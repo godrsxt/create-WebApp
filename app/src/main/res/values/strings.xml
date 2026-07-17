@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Change "My Web App" to whatever you want -->
     <string name="app_name">My Web App</string>
 </resources>
