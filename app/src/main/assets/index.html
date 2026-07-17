@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Universal Web App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #222;
+            color: white;
+            text-align: center;
+            padding: 50px;
+        }
+        button {
+            padding: 15px 30px;
+            font-size: 18px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>WebView Version 1: Regular</h1>
+    <p>Drop your HTML, CSS, and JS files in the <b>assets</b> folder.</p>
+    
+    <button onclick="showAlert()">Test JavaScript</button>
+
+    <script>
+        function showAlert() {
+            alert("JavaScript is working perfectly in your offline app!");
+        }
+    </script>
+    
+</body>
+</html>

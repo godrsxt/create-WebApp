@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.UniversalWebView" parent="Theme.AppCompat.Light.NoActionBar">
+        <!-- Hides the top action bar to give more space to the WebView -->
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <!-- Set the status bar color at the top of the phone -->
+        <item name="android:statusBarColor">#000000</item> 
+    </style>
+</resources>
