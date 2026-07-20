@@ -1,40 +1,704 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal Web App</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #222;
-            color: white;
-            text-align: center;
-            padding: 50px;
-        }
-        button {
-            padding: 15px 30px;
-            font-size: 18px;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-        }
-    </style>
+<meta charset="UTF-8">
+<!-- Android WebView optimization: prevents zoom, handles notch cutouts -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>NEON SHADOW // Micro-Roguelike Deckbuilder</title>
+<style>
+:root{
+  --bg:#0a0c10;--panel:#11141a;--panel-b:#1a1e28;--text:#e8eef4;--muted:#6b7b8c;
+  --accent:#00d4aa;--accent-dim:#00d4aa44;--warn:#ffcc00;--danger:#ff4757;--dmg:#ff6b6b;--blk:#4ecdc4;--heal:#7bed9f;--gold:#ffd93d;--purple:#b873ff;--cyan:#00ffff;
+  --font:'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  --radius:8px;--shadow:0 8px 32px #000000aa;--trans:0.15s cubic-bezier(0.2,0.8,0.2,1);
+}
+*,*:before,*:after{box-sizing:border-box;margin:0;padding:0}
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap');
+html,body{height:100%;width:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px;line-height:1.5;touch-action:none;}
+#game{width:100%;height:100%;display:flex;flex-direction:column}
+.hidden{display:none!important}
+
+/* ── Landscape Enforcement ── */
+#orientation-warning {
+  position: fixed; inset: 0; background: var(--bg); z-index: 9999;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; padding: 24px; font-size: 18px; color: var(--warn);
+}
+#orientation-warning svg { width: 64px; height: 64px; margin-bottom: 16px; animation: rotatePhone 2s infinite ease-in-out; }
+@keyframes rotatePhone { 0% { transform: rotate(0deg); } 50% { transform: rotate(-90deg); } 100% { transform: rotate(-90deg); } }
+@media screen and (orientation: landscape) { #orientation-warning { display: none !important; } }
+@media screen and (orientation: portrait) { #game { display: none !important; } }
+
+/* ── Android Start Overlay ── */
+#start-overlay {
+  position: fixed; inset: 0; background: rgba(10, 12, 16, 0.95); z-index: 10000;
+  display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 20px;
+}
+
+/* ── Background Grid ── */
+#bg-canvas{position:fixed;inset:0;z-index:0;opacity:0.6;pointer-events:none;}
+
+/* ── Screens ── */
+.screen{position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;background:linear-gradient(180deg,#0a0c10 0%,#0f131a 100%)}
+.screen.active{z-index:20}
+
+/* ── Top Bar ── */
+.top-bar{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--panel-b);z-index:5}
+.resources{display:flex;gap:16px;align-items:center}
+.res{display:flex;align-items:center;gap:6px;font-weight:700;font-size:14px}
+.res .icon{width:18px;height:18px;display:block}
+.res.hp .icon{color:var(--dmg)}
+.res.gold .icon{color:var(--gold)}
+.res.pot .icon{color:var(--purple)}
+.floor-info{color:var(--muted);font-size:12px}
+.run-stats{display:flex;gap:12px;color:var(--muted);font-size:11px}
+
+/* ── Map ── */
+#map-screen .map-container{flex:1;overflow:auto;padding:24px;display:flex;justify-content:center;align-items:flex-start}
+.map{display:flex;flex-direction:column;gap:28px;align-items:center;position:relative}
+.map::before{content:'';position:absolute;left:50%;top:0;bottom:0;width:2px;background:linear-gradient(180deg,transparent,var(--accent-dim),transparent);transform:translateX(-50%);z-index:0}
+.map-row{display:flex;gap:16px;justify-content:center;position:relative;z-index:1}
+.node{width:56px;height:56px;border-radius:50%;border:2px solid var(--panel-b);background:var(--panel);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:20px;transition:var(--trans);position:relative;box-shadow:var(--shadow)}
+.node:active{transform:scale(0.95);}
+.node:hover:not(.completed):not(.unavailable){transform:scale(1.15);border-color:var(--accent);box-shadow:0 0 24px var(--accent-dim)}
+.node.completed{opacity:0.35;border-color:#2a2e38;cursor:default}
+.node.unavailable{opacity:0.15;cursor:not-allowed}
+.node.current{box-shadow:0 0 0 3px var(--bg),0 0 24px var(--accent);border-color:var(--accent);animation:pulse 1.5s ease-in-out infinite}
+.node.boss{width:72px;height:72px;font-size:28px;border-width:3px}
+.node.elite{background:linear-gradient(135deg,#1a0d12,var(--panel));border-color:#ff475755}
+.node.shop{background:linear-gradient(135deg,#1a150d,var(--panel));border-color:#ffcc0055}
+.node.rest{background:linear-gradient(135deg,#0d1a12,var(--panel));border-color:#00d4aa55}
+.node.event{background:linear-gradient(135deg,#150d1a,var(--panel));border-color:#b873ff55}
+.node-type{position:absolute;bottom:-18px;left:50%;transform:translateX(-50%);font-size:9px;color:var(--muted);white-space:nowrap;text-transform:uppercase;letter-spacing:0.5px}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 3px var(--bg),0 0 16px var(--accent)}50%{box-shadow:0 0 0 3px var(--bg),0 0 32px var(--accent)}}
+.path{position:absolute;left:50%;width:2px;height:28px;background:var(--accent-dim);transform:translateX(-50%);z-index:0;pointer-events:none}
+.path.active{background:var(--accent);box-shadow:0 0 8px var(--accent)}
+
+/* ── Combat ── */
+#combat-screen{flex:1;display:flex;flex-direction:column;position:relative}
+.combat-bg{position:absolute;inset:0;background:radial-gradient(ellipse at center, #151a22 0%, #0a0c10 70%);z-index:-1}
+.enemy-area{flex:0 0 40%;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:10px;position:relative}
+.enemy-sprite{width:120px;height:120px;position:relative;filter:drop-shadow(0 16px 32px #000000cc);transition:transform 0.1s}
+.enemy-sprite.hit{animation:hitFlash 0.15s ease-out}
+.enemy-sprite.dead{animation:die 0.6s ease-out forwards}
+@keyframes hitFlash{0%,100%{filter:drop-shadow(0 16px 32px #000000cc)}50%{filter:drop-shadow(0 16px 32px #000000cc) brightness(1.8) saturate(2) hue-rotate(-20deg)}}
+@keyframes die{0%{transform:scale(1) rotate(0deg);opacity:1}100%{transform:scale(0.3) rotate(-30deg) translateY(40px);opacity:0}}
+.enemy-hp-bar{width:200px;height:10px;background:var(--panel-b);border-radius:5px;margin-top:12px;overflow:hidden;border:1px solid #222}
+.enemy-hp-fill{height:100%;background:linear-gradient(90deg,var(--danger),#ff8a6b);border-radius:5px;transition:width 0.3s ease-out;transform-origin:left}
+.enemy-intent{display:flex;gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap}
+.intent{padding:4px 10px;background:var(--panel);border:1px solid var(--panel-b);border-radius:20px;font-size:11px;display:flex;align-items:center;gap:6px;color:var(--muted)}
+.intent.attack{color:var(--dmg);border-color:var(--dmg);background:rgba(255,71,87,0.1)}
+.intent.block{color:var(--blk);border-color:var(--blk);background:rgba(78,205,196,0.1)}
+.intent.buff{color:var(--warn);border-color:var(--warn);background:rgba(255,204,0,0.1)}
+.intent.debuff{color:var(--purple);border-color:var(--purple);background:rgba(184,115,255,0.1)}
+.intent .val{font-weight:700;color:var(--text)}
+.enemy-name{color:var(--muted);font-size:12px;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px}
+
+.player-area{flex:1;display:flex;flex-direction:column;background:linear-gradient(0deg,var(--panel) 0%,transparent 100%);border-top:1px solid var(--panel-b)}
+.player-stats{display:flex;justify-content:space-between;align-items:center;padding:8px 20px;border-bottom:1px solid var(--panel-b);background:rgba(0,0,0,0.3)}
+.stat{display:flex;align-items:center;gap:8px}
+.stat .label{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:0.5px}
+.stat .val{font-size:20px;font-weight:800}
+.stat.hp .val{color:var(--dmg)}
+.stat.block .val{color:var(--blk)}
+.stat.energy .val{color:var(--cyan)}
+.energy-orbs{display:flex;gap:4px}
+.orb{width:14px;height:14px;border-radius:50%;background:var(--panel-b);border:2px solid #2a2e38;transition:var(--trans)}
+.orb.filled{background:radial-gradient(circle at 30% 30%,#6efffd,var(--cyan));box-shadow:0 0 12px var(--cyan);border-color:var(--cyan)}
+.orb.used{opacity:0.3;background:var(--panel-b);box-shadow:none;border-color:#2a2e38}
+
+/* Android Touch specific layout adjustments */
+.combat-content { display: flex; flex: 1; align-items: stretch; justify-content: space-between; overflow: hidden; }
+.hand-area{flex:1;display:flex;align-items:flex-end;justify-content:center;padding:16px 8px 16px;gap:8px;overflow-x:auto;perspective:800px; scroll-behavior: smooth; -webkit-overflow-scrolling: touch;}
+.touch-controls { width: 120px; display: flex; flex-direction: column; justify-content: flex-end; padding: 16px; background: rgba(0,0,0,0.4); border-left: 1px solid var(--panel-b); }
+.btn-end-turn { height: 60px; font-size: 14px; box-shadow: 0 4px 16px rgba(0, 212, 170, 0.2); }
+
+.card{width:105px;height:150px;background:var(--panel);border:2px solid var(--panel-b);border-radius:12px;display:flex;flex-direction:column;cursor:pointer;transition:transform 0.15s ease-out;position:relative;box-shadow:0 8px 24px #00000088;flex-shrink:0;transform-origin:center bottom; user-select: none; -webkit-user-select: none;}
+.card:active:not(.exhausted):not(.unplayable){transform:scale(0.95); border-color:var(--cyan);}
+.card.selected{transform:translateY(-16px) scale(1.05);border-color:var(--cyan);box-shadow:0 12px 32px #00ffff44,0 8px 24px #000000aa;z-index:20}
+.card.unplayable{opacity:0.45;cursor:not-allowed;filter:grayscale(0.7)}
+.card.exhausted{opacity:0.2;transform:rotate(-5deg) scale(0.9);pointer-events:none}
+.card.type-attack{border-left:4px solid var(--dmg)}
+.card.type-skill{border-left:4px solid var(--blk)}
+.card.type-power{border-left:4px solid var(--purple)}
+.card-cost{position:absolute;top:4px;left:4px;width:24px;height:24px;background:radial-gradient(circle at 30% 30%,#3a3f4a,var(--panel));border:2px solid var(--cyan);border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;color:var(--cyan);box-shadow:0 0 12px var(--cyan),inset 0 -2px 4px #0008}
+.card-name{padding:28px 6px 4px;font-weight:700;font-size:11px;text-align:center;line-height:1.2;text-transform:uppercase;letter-spacing:0.3px}
+.card-type{text-align:center;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+.card-desc{flex:1;padding:0 8px 8px;font-size:10px;line-height:1.4;color:var(--text);overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical}
+
+/* ── Rewards / Events / Shop ── */
+.modal-overlay{position:fixed;inset:0;background:#000000dd;z-index:100;display:flex;align-items:center;justify-content:center;padding:20px;opacity:0;pointer-events:none;transition:opacity 0.2s}
+.modal-overlay.active{opacity:1;pointer-events:auto}
+.modal{background:var(--panel);border:1px solid var(--panel-b);border-radius:12px;width: 90vw; max-width: 600px; max-height:85vh; overflow:hidden; display:flex; flex-direction:column; box-shadow:var(--shadow);}
+.modal-header{padding:16px;border-bottom:1px solid var(--panel-b);display:flex;justify-content:space-between;align-items:center;background:linear-gradient(180deg,rgba(255,255,255,0.03),transparent)}
+.modal-title{font-size:16px;font-weight:800;text-transform:uppercase;letter-spacing:1px}
+.modal-body{padding:20px;overflow-y:auto;flex:1; -webkit-overflow-scrolling: touch;}
+.modal-footer{padding:16px;border-top:1px solid var(--panel-b);display:flex;justify-content:flex-end;gap:12px;background:rgba(0,0,0,0.2)}
+
+/* Buttons */
+.btn{padding:12px 24px;border-radius:8px;font-family:var(--font);font-size:13px;font-weight:700;cursor:pointer;transition:var(--trans);border:2px solid transparent;text-transform:uppercase;letter-spacing:0.5px; user-select: none; -webkit-user-select: none; touch-action: manipulation;}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#000}
+.btn-primary:active:not(:disabled){background:#00ffc8;transform:scale(0.95);}
+.btn-secondary{background:transparent;border-color:var(--panel-b);color:var(--text)}
+.btn-secondary:active:not(:disabled){background:var(--panel-b);transform:scale(0.95);}
+.btn:disabled{opacity:0.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+
+.event-btn{padding:16px 20px; width: 100%; margin-bottom: 8px; background:var(--panel-b);border:1px solid var(--panel-b);border-radius:8px;color:var(--text);font-family:var(--font);font-size:13px;cursor:pointer;transition:var(--trans);text-align:left; touch-action: manipulation;}
+.event-btn:active{background:var(--accent);border-color:var(--accent);color:#000;font-weight:700}
+
+/* Rewards Grid */
+.reward-options{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+.reward-card{width:140px;height:190px;background:var(--panel-b);border:2px solid var(--panel-b);border-radius:12px;display:flex;flex-direction:column;cursor:pointer;transition:var(--trans);position:relative;overflow:hidden}
+.reward-card:active{transform:scale(0.95);border-color:var(--accent);}
+.reward-tag{position:absolute;top:8px;left:8px;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px}
+.reward-tag.card{background:var(--accent);color:#000}
+.reward-tag.relic{background:var(--cyan);color:#000}
+.reward-icon{font-size:48px;text-align:center;margin:24px 0 12px;}
+.reward-name{text-align:center;font-weight:700;font-size:12px;padding:0 8px 6px;text-transform:uppercase;}
+.reward-desc{flex:1;padding:0 8px 12px;font-size:10px;color:var(--muted);text-align:center;overflow:hidden;}
+
+/* Shop Grid */
+.shop-tabs{display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--panel-b);padding-bottom:8px; overflow-x: auto;}
+.shop-tab{padding:10px 16px;background:transparent;border:1px solid transparent;border-radius:6px;color:var(--muted);font-family:var(--font);font-size:12px;cursor:pointer;white-space:nowrap;}
+.shop-tab.active{background:var(--accent);color:#000;font-weight:700}
+.shop-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px}
+.shop-item{background:var(--panel-b);border:1px solid var(--panel-b);border-radius:10px;padding:12px;display:flex;flex-direction:column;align-items:center;cursor:pointer}
+.shop-item:active{border-color:var(--accent);transform:scale(0.95)}
+.shop-item.unaffordable{opacity:0.5;pointer-events:none}
+.shop-item-name{font-weight:700;font-size:11px;text-align:center;margin-bottom:6px;}
+.shop-item-cost{display:flex;align-items:center;gap:6px;font-weight:700;color:var(--gold);font-size:14px;margin-bottom:8px}
+
+/* Floating Numbers & End Screen */
+.floating{position:absolute;pointer-events:none;font-weight:800;font-size:18px;animation:floatUp 0.9s cubic-bezier(0.1,0.7,0.3,1) forwards;z-index:30;text-shadow:0 2px 8px #000000cc}
+.floating.dmg{color:var(--dmg);font-size:22px}
+.floating.blk{color:var(--blk)}
+.floating.heal{color:var(--heal)}
+@keyframes floatUp{0%{transform:translate(0,0) scale(0.5);opacity:0}15%{opacity:1;transform:translate(var(--tx,0),var(--ty,-20px)) scale(1.2)}100%{transform:translate(var(--tx,0),var(--ty,-100px)) scale(1);opacity:0}}
+
+.end-screen{position:fixed;inset:0;background:#000000f0;z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:40px;opacity:0;pointer-events:none;transition:opacity 0.3s}
+.end-screen.active{opacity:1;pointer-events:auto}
+.end-title{font-size:40px;font-weight:800;text-transform:uppercase;letter-spacing:2px;background:linear-gradient(90deg,var(--accent),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.end-title.defeat{background:linear-gradient(90deg,var(--danger),#ff8a6b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.end-stats{display:flex;gap:24px;color:var(--muted);font-size:12px; text-align: center;}
+.end-stat .val{font-size:24px;font-weight:800;color:var(--text); display:block;}
+</style>
 </head>
 <body>
 
-    <h1>WebView Version 1: Regular</h1>
-    <p>Drop your HTML, CSS, and JS files in the <b>assets</b> folder.</p>
-    
-    <button onclick="showAlert()">Test JavaScript</button>
+<!-- Android Setup: Forces Landscape & Fullscreen via gesture -->
+<div id="start-overlay">
+  <h1 style="color:var(--accent); letter-spacing: 2px;">NEON SHADOW</h1>
+  <p style="color:var(--muted); font-size: 14px; text-align:center; max-width: 300px;">
+    Optimized for Android WebViews & Local Execution.
+  </p>
+  <button class="btn btn-primary" id="initGameBtn" style="padding: 16px 40px; font-size: 16px;">TAP TO START</button>
+</div>
 
-    <script>
-        function showAlert() {
-            alert("JavaScript is working perfectly in your offline app!");
-        }
-    </script>
+<div id="orientation-warning">
+  <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H8C6.34 1 5 2.34 5 4v16c0 1.66 1.34 3 3 3h8c1.66 0 3-1.34 3-3V4c0-1.66-1.34-3-3-3zm1 17H7V6h10v12z"/></svg>
+  <div>Please rotate device to Landscape Mode</div>
+</div>
+
+<div id="game">
+  <canvas id="bg-canvas"></canvas>
+
+  <!-- TOP BAR -->
+  <div class="top-bar" id="topBar">
+    <div class="resources">
+      <div class="res hp"><svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg><span id="hpDisplay">80</span>/<span id="maxHpDisplay">80</span></div>
+      <div class="res gold"><svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg><span id="goldDisplay">99</span></div>
+    </div>
+    <div class="floor-info" id="floorDisplay">ACT I — FLOOR 1</div>
+  </div>
+
+  <!-- MAP SCREEN -->
+  <div class="screen active" id="map-screen">
+    <div class="map-container">
+      <div class="map" id="map"></div>
+    </div>
+  </div>
+
+  <!-- COMBAT SCREEN -->
+  <div class="screen" id="combat-screen">
+    <div class="combat-bg"></div>
     
+    <div class="enemy-area">
+      <div class="enemy-name" id="enemyName"></div>
+      <div class="enemy-sprite" id="enemySprite"></div>
+      <div class="enemy-hp-bar"><div class="enemy-hp-fill" id="enemyHpFill" style="width:100%"></div></div>
+      <div class="enemy-intent" id="enemyIntent"></div>
+    </div>
+
+    <div class="player-area">
+      <div class="player-stats">
+        <div class="stat hp"><span class="label">HP</span><span class="val" id="combatHp">0</span>/<span id="combatMaxHp">0</span></div>
+        <div class="stat block"><span class="label">BLK</span><span class="val" id="combatBlock">0</span></div>
+        <div class="stat energy"><span class="label">ENG</span><div class="energy-orbs" id="energyOrbs"></div></div>
+      </div>
+      
+      <!-- Android Virtual Touch Layout -->
+      <div class="combat-content">
+        <div class="hand-area" id="handArea"></div>
+        <div class="touch-controls">
+          <button class="btn btn-primary btn-end-turn" id="endTurnBtn">END TURN</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MODAL OVERLAY -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal" id="modal">
+      <div class="modal-header">
+        <div class="modal-title" id="modalTitle"></div>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer" id="modalFooter"></div>
+    </div>
+  </div>
+
+  <!-- END SCREEN -->
+  <div class="end-screen" id="endScreen">
+    <div class="end-title" id="endTitle">VICTORY</div>
+    <div class="end-stats" id="endStats"></div>
+    <div style="display:flex; gap: 16px; margin-top: 24px;">
+      <button class="btn btn-primary" id="newRunBtn">NEW RUN</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// Mobile Startup Injection
+document.getElementById('initGameBtn').addEventListener('click', async () => {
+    try {
+        if(document.documentElement.requestFullscreen) {
+            await document.documentElement.requestFullscreen();
+        }
+        if(screen.orientation && screen.orientation.lock) {
+            await screen.orientation.lock('landscape');
+        }
+    } catch (err) {
+        console.warn("Fullscreen/Orientation API not supported or rejected.", err);
+    }
+    document.getElementById('start-overlay').classList.add('hidden');
+});
+
+// ═══════════════════════════════════════════════════════════════
+// GAME DATA 
+// ═══════════════════════════════════════════════════════════════
+
+const CARDS = [
+  {id:'strike',name:'Strike',type:'attack',cost:1,rarity:'basic',desc:'Deal 6 damage.',baseDmg:6,upgrade:{baseDmg:9}},
+  {id:'defend',name:'Defend',type:'skill',cost:1,rarity:'basic',desc:'Gain 5 Block.',baseBlk:5,upgrade:{baseBlk:8}},
+  {id:'bash',name:'Bash',type:'attack',cost:2,rarity:'basic',desc:'Deal 8 damage. Apply 2 Vulnerable.',baseDmg:8,debuff:{vulnerable:2},upgrade:{baseDmg:10,debuff:{vulnerable:3}}},
+  {id:'heavy_blade',name:'Heavy Blade',type:'attack',cost:2,rarity:'common',desc:'Deal 14 damage.',baseDmg:14,upgrade:{baseDmg:18}},
+  {id:'survivor',name:'Survivor',type:'skill',cost:1,rarity:'common',desc:'Gain 8 Block. Discard a card.',baseBlk:8,upgrade:{baseBlk:11}}
+];
+
+const ENEMIES = {
+  'slime_s':{name:'Acid Slime',hp:[28,32],sprite:'🟢',act:1,gold:[12,15],intents:[{type:'attack',dmg:7},{type:'debuff',effect:'weak',amt:1}]},
+  'jaw_worm':{name:'Jaw Worm',hp:[40,44],sprite:'🟠',act:1,gold:[15,19],intents:[{type:'attack',dmg:11},{type:'block',amt:6}]},
+  'gremlin_nob':{name:'Gremlin Nob',hp:[70,75],sprite:'👺',act:1,elite:true,gold:[35,40],intents:[{type:'attack',dmg:7,hits:2},{type:'buff',effect:'strength',amt:2}]},
+  'hexaghost':{name:'Hexaghost',hp:[250,270],sprite:'👻',act:1,boss:true,gold:[90,100],intents:[{type:'attack',dmg:12,hits:2},{type:'special',effect:'sear'}]}
+};
+
+const RELICS = [
+  {id:'burning_blood',name:'Burning Blood',desc:'Heal 6 HP at the end of combat.',type:'common',onCombatEnd:(s)=>s.heal(6)},
+  {id:'oddly_smooth_stone',name:'Oddly Smooth Stone',desc:'Start each combat with 6 Block.',type:'common',onCombatStart:(s)=>s.gainBlock(6)}
+];
+
+// FIXED: Potions Array completed properly
+const POTIONS = [
+  {id:'attack_potion',name:'Attack Potion',desc:'Gain 2 Strength for this combat.',type:'common',use:(s)=>s.applyBuff('strength',2)},
+  {id:'block_potion',name:'Block Potion',desc:'Gain 15 Block.',type:'common',use:(s)=>s.gainBlock(15)},
+  {id:'dexterity_potion',name:'Dexterity Potion',desc:'Gain 2 Dexterity for this combat.',type:'uncommon',use:(s)=>s.applyBuff('dexterity',2)},
+  {id:'energy_potion',name:'Energy Potion',desc:'Gain 2 Energy.',type:'common',use:(s)=>s.gainEnergy(2)},
+  {id:'explosive_potion',name:'Explosive Potion',desc:'Deal 30 damage to ALL enemies.',type:'uncommon',use:(s)=>s.enemies.forEach(e=>e.takeDamage(30,s))},
+  {id:'fear_potion',name:'Fear Potion',desc:'Apply 3 Weak to ALL enemies.',type:'uncommon',use:(s)=>s.enemies.forEach(e=>e.applyDebuff('weak',3))},
+  {id:'fire_potion',name:'Fire Potion',desc:'Deal 20 damage to a random enemy.',type:'uncommon',use:(s)=>{const t=s.enemies.filter(e=>e.hp>0);if(t.length)t[rand(0,t.length-1)].takeDamage(20,s)}}},
+  {id:'strength_potion',name:'Strength Potion',desc:'Gain 3 Strength.',type:'common',use:(s)=>s.applyBuff('strength',3)},
+  {id:'regeneration_potion',name:'Regeneration Potion',desc:'Heal 30 HP.',type:'rare',use:(s)=>s.heal(30)},
+];
+
+const EVENTS = [
+  {id:'golden_idol',name:'Golden Idol',act:1,text:`An ancient pedestal holds a golden idol.`,options:[
+    {text:'Take it [Gain 300 Gold, Lose 5 Max HP]',req:()=>true,act:(s)=>{s.gold+=300;s.maxHp-=5;s.hp=Math.min(s.hp,s.maxHp);}},
+    {text:'Leave it',req:()=>true,act:()=>{}}]}
+];
+
+// ═══════════════════════════════════════════════════════════════
+// UTILITY 
+// ═══════════════════════════════════════════════════════════════
+const rand=(min,max)=>Math.floor(Math.random()*(max-min+1))+min;
+const choose=(arr)=>arr[rand(0,arr.length-1)];
+const shuffle=(a)=>{for(let i=a.length-1;i>0;i--){const j=rand(0,i);[a[i],a[j]]=[a[j],a[i]]}return a};
+
+function randRelic(rarity){const p=RELICS.filter(r=>r.type===rarity); return p.length?choose(p).id:RELICS[0].id;}
+function randCard(rarity){const p=CARDS.filter(c=>c.rarity===rarity); return p.length?choose(p).id:CARDS[0].id;}
+function randPotion(){return choose(POTIONS).id;}
+
+// ═══════════════════════════════════════════════════════════════
+// GAME STATE ENGINE 
+// ═══════════════════════════════════════════════════════════════
+class GameState{
+  constructor(){this.reset()}
+  reset(){
+    this.hp=80;this.maxHp=80;this.gold=99;this.floor=0;this.act=1;
+    this.maxEnergy=3;this.energy=3;this.drawPerTurn=5;
+    this.relicsOwned=[];this.relics={};
+    this.potions=[];
+    this.deck=[];this.hand=[];this.discard=[];this.exhaust=[];this.drawPile=[];
+    this.block=0;this.strength=0;this.dexterity=0;this.vulnerable=0;this.weak=0;
+    this.powers=[];this.enemies=[];this.turn=0;this.isPlayerTurn=true;
+    this.damageDealt=0;this.goldGained=0;this.cardsPlayedTotal=0;
+    this.initDeck();
+  }
+  initDeck(){
+    this.deck=[...Array(4).fill('strike'),...Array(4).fill('defend'),'bash'].map(id=>this.createCard(id));
+    this.shuffleDeck();
+  }
+  createCard(id,upgraded=false){
+    const base=CARDS.find(c=>c.id===id);
+    return{...base,upgraded,uuid:crypto.randomUUID(),tempCost:null,tempDmg:0,tempBlk:0,exhausted:false}
+  }
+  shuffleDeck(){this.drawPile=shuffle([...this.deck]);this.hand=[];this.discard=[]}
+  drawCards(n){
+    for(let i=0;i<n;i++){
+      if(this.drawPile.length===0){
+        if(this.discard.length===0)break;
+        this.drawPile=shuffle([...this.discard]);this.discard=[]
+      }
+      this.hand.push(this.drawPile.pop())
+    }
+    this.renderHand()
+  }
+  endTurn(){
+    if(!this.isPlayerTurn) return;
+    this.isPlayerTurn=false;this.block=0;
+    this.hand.forEach(c=>{if(!c.exhausted)this.discard.push(c)});
+    this.hand=[];
+    
+    this.vulnerable=Math.max(0,this.vulnerable-1);
+    this.weak=Math.max(0,this.weak-1);
+    
+    this.enemyTurn();
+    this.isPlayerTurn=true;
+    this.startTurn();
+  }
+  startTurn(){
+    this.turn++;this.energy=this.maxEnergy;
+    this.drawCards(this.drawPerTurn);
+    this.updateEnergyOrbs();
+    this.renderHand();
+    this.renderPlayerStats();
+  }
+  enemyTurn(){
+    this.enemies.filter(e=>e.hp>0).forEach(e=>e.executeIntent(this));
+    this.enemies=this.enemies.filter(e=>e.hp>0);
+    if(this.enemies.length===0){ window.victory(); return; }
+    renderEnemy();
+  }
+  playCard(idx){
+    const card = this.hand[idx];
+    if(!this.isPlayerTurn||card.unplayable||card.exhausted)return;
+    const cost = card.tempCost !== null ? card.tempCost : card.cost;
+    if(this.energy<cost) return;
+    
+    this.energy-=cost; this.cardsPlayedTotal++; this.updateEnergyOrbs();
+    
+    const dmg=(card.baseDmg||0)+(card.type==='attack'?this.strength:0);
+    const blk=(card.baseBlk||0)+(card.type==='skill'?this.dexterity:0);
+    const target=this.enemies[0];
+    
+    if(card.type==='attack' && target){
+      const mult=target.vulnerable?1.5:1;
+      const final=Math.floor(dmg*mult);
+      target.takeDamage(final,this);
+      this.damageDealt+=final;
+    }
+    if(blk>0) this.gainBlock(blk);
+    if(card.debuff && target){Object.entries(card.debuff).forEach(([k,v])=>target.applyDebuff(k,v))}
+    
+    if(card.exhaust){ this.exhaust.push(card); } else { this.discard.push(card); }
+    this.hand.splice(idx, 1);
+    this.renderHand();
+    
+    if(this.enemies.filter(e=>e.hp>0).length===0) window.victory();
+  }
+  
+  gainBlock(amt){this.block+=amt;this.renderPlayerStats();this.showFloat(`+${amt}`,'blk')}
+  gainEnergy(amt){this.energy=Math.min(this.maxEnergy,this.energy+amt);this.updateEnergyOrbs()}
+  applyBuff(type,amt){
+    if(type==='strength')this.strength+=amt; 
+    if(type==='dexterity')this.dexterity+=amt;
+    this.renderPlayerStats();
+  }
+  takeDamage(dmg,source=null){
+    let taken=dmg;
+    if(this.block>0){const b=Math.min(this.block,taken);this.block-=b;taken-=b}
+    this.hp=Math.max(0,this.hp-taken);
+    this.renderPlayerStats();
+    this.showFloat(`-${taken}`,'dmg');
+    if(this.hp<=0) window.defeat();
+  }
+  heal(amt){this.hp=Math.min(this.maxHp,this.hp+amt);this.renderPlayerStats();this.showFloat(`+${amt}`,'heal')}
+  
+  addCardToDeck(id,upgraded=false){const c=this.createCard(id,upgraded);if(c)this.deck.push(c)}
+  obtainRelic(id){if(this.relicsOwned.includes(id))return;this.relicsOwned.push(id);this.relics[id]=true;}
+  
+  showFloat(txt,cls){
+    const el=document.createElement('div');el.className=`floating ${cls}`;
+    el.textContent=txt; el.style.setProperty('--tx',`${rand(-20,20)}px`);
+    document.getElementById('combat-screen').appendChild(el);
+    setTimeout(()=>el.remove(),900);
+  }
+  
+  renderPlayerStats(){
+    $('combatHp').textContent=this.hp; $('combatMaxHp').textContent=this.maxHp;
+    $('combatBlock').textContent=this.block;
+    $('hpDisplay').textContent=this.hp; $('maxHpDisplay').textContent=this.maxHp;
+    $('goldDisplay').textContent=this.gold;
+  }
+  
+  updateEnergyOrbs(){
+    const el=$('energyOrbs');el.innerHTML='';
+    for(let i=0;i<this.maxEnergy;i++){
+      const o=document.createElement('div');
+      o.className='orb'+(i<this.energy?' filled':'');
+      el.appendChild(o);
+    }
+  }
+  
+  renderHand(){
+    const el=$('handArea');el.innerHTML='';
+    this.hand.forEach((c,i)=>{
+      const cost = c.tempCost !== null ? c.tempCost : c.cost;
+      const div=document.createElement('div');
+      div.className='card type-'+c.type+(this.energy<cost?' unplayable':'');
+      div.innerHTML=`
+        <div class="card-cost">${cost}</div>
+        <div class="card-name">${c.name}${c.upgraded?'+':''}</div>
+        <div class="card-type">${c.type}</div>
+        <div class="card-desc">${c.desc}</div>`;
+      // Direct touch event linking for WebView compatibility
+      div.onclick = () => this.playCard(i);
+      el.appendChild(div);
+    })
+  }
+}
+
+class Enemy{
+  constructor(data){
+    this.data=data;this.name=data.name;this.sprite=data.sprite;
+    this.maxHp=rand(data.hp[0],data.hp[1]);this.hp=this.maxHp;
+    this.intents=data.intents||[];this.block=0;this.strength=0;this.vulnerable=0;
+    this.rollIntent();
+  }
+  rollIntent(){this.intent=choose(this.intents);}
+  executeIntent(gs){
+    const i=this.intent;
+    if(i.type==='attack'){
+      let dmg=i.dmg+this.strength;
+      if(i.hits){for(let h=0;h<i.hits;h++)gs.takeDamage(dmg,this)}else gs.takeDamage(dmg,this);
+    }
+    if(i.type==='block') this.block+=i.amt;
+    if(i.type==='debuff') gs.vulnerable+=i.amt;
+    if(this.hp>0)this.rollIntent();
+  }
+  applyDebuff(type,amt){if(type==='vulnerable')this.vulnerable+=amt;}
+  takeDamage(dmg,src){
+    let taken=dmg;
+    if(this.block>0){const b=Math.min(this.block,taken);this.block-=b;taken-=b}
+    this.hp=Math.max(0,this.hp-taken);
+    renderEnemy();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// UI BINDINGS & LOGIC
+// ═══════════════════════════════════════════════════════════════
+const game=new GameState();
+function $(id){return document.getElementById(id)}
+function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));$(id).classList.add('active');}
+function openModal(title,body,footer=''){$('modalTitle').textContent=title;$('modalBody').innerHTML=body;$('modalFooter').innerHTML=footer;$('modalOverlay').classList.add('active')}
+function closeModal(){$('modalOverlay').classList.remove('active')}
+
+// Map Engine
+function generateMap(){
+  const floors=10; const rows=[]; let prev=[{x:0,y:0,type:'combat',completed:false}];
+  for(let f=1;f<=floors;f++){
+    const isBoss=f===floors; const count=isBoss?1:rand(2,4); const row=[];
+    for(let i=0;i<count;i++){
+      let type = isBoss ? 'boss' : (f===floors-1 ? 'rest' : choose(['combat','combat','event','shop','rest']));
+      row.push({x:i-(count-1)/2,y:f,type,completed:false,unavailable:false,connections:[]});
+    }
+    row.forEach(n=>{const close=prev.filter(p=>Math.abs(p.x-n.x)<=1);if(close.length)n.connections=close.map(c=>c.id)});
+    prev.forEach(p=>{const close=row.filter(n=>Math.abs(n.x-p.x)<=1);p.connections=close.map(c=>c.id)});
+    rows.push(row);prev=row;
+  }
+  return rows.flat();
+}
+
+function renderMap(){
+  const map=$('map');map.innerHTML='';
+  game.mapData.forEach((n,i)=>{
+    n.id=i;
+    const div=document.createElement('div');
+    div.className='node '+n.type+(n.completed?' completed':'')+(n.unavailable?' unavailable':'')+(game.currentNode===i?' current':'');
+    div.innerHTML={'combat':'⚔️','rest':'🔥','shop':'💰','event':'❓','boss':'👑'}[n.type]||'';
+    div.onclick=()=>selectNode(i);
+    const label=document.createElement('div');label.className='node-type';label.textContent=n.type;
+    div.appendChild(label); map.appendChild(div);
+  });
+  game.mapData.forEach(n=>{n.connections.forEach(cId=>{
+    const c=game.mapData[cId];if(c&&c.y>n.y){
+      const line=document.createElement('div');
+      line.className='path'+(n.completed&&c.completed?' active':'');
+      line.style.left=`${50+(n.x*18)}%`;line.style.top=`${(n.y*6.5)+5.5}%`;line.style.height=`${(c.y-n.y)*6.5-1}%`;
+      map.appendChild(line);
+    }
+  })});
+}
+
+function selectNode(idx){
+  const n=game.mapData[idx];
+  if(n.unavailable||n.completed||(game.currentNode!==null&&!game.mapData[game.currentNode].connections.includes(idx)))return;
+  game.currentNode=idx;
+  game.mapData.forEach((m,i)=>{m.unavailable = i!==idx && !m.completed && game.currentNode!==null && !game.mapData[game.currentNode].connections.includes(i)});
+  n.completed=true;
+  enterNode(n);
+}
+
+function enterNode(n){
+  game.floor++; $('floorDisplay').textContent=`ACT ${game.act} — FLOOR ${game.floor}`;
+  switch(n.type){
+    case 'combat': case 'boss': startCombat(n.type==='boss'); break;
+    case 'rest': showRest(); break;
+    case 'shop': showShop(); break;
+    case 'event': triggerEvent(); break;
+  }
+  renderMap();
+}
+
+// Combat Engine
+function startCombat(isBoss=false){
+  showScreen('combat-screen');
+  const pool=Object.entries(ENEMIES).filter(([k,v])=>v.act===game.act && !!v.boss===isBoss);
+  const [key,data]=choose(pool);
+  game.enemies=[new Enemy(data)];
+  game.turn=0; game.block=0; game.strength=0; game.vulnerable=0;
+  game.drawCards(game.drawPerTurn);
+  game.startTurn();
+  renderEnemy();
+}
+
+function renderEnemy(){
+  const e=game.enemies[0];if(!e)return;
+  $('enemyName').textContent=e.name;
+  $('enemySprite').textContent=e.sprite;
+  $('enemyHpFill').style.width=`${(e.hp/e.maxHp)*100}%`;
+  
+  if(e.intent){
+    const v = e.intent.type==='attack' ? (e.intent.hits?`${e.intent.dmg}x${e.intent.hits}`:e.intent.dmg+e.strength) : (e.intent.amt||'');
+    $('enemyIntent').innerHTML=`<div class="intent ${e.intent.type}"><span>${e.intent.type==='attack'?'⚔️':'🛡️'}</span><span class="val">${v}</span></div>`;
+  }
+}
+
+// Nodes & Modals
+function showRest(){
+  openModal('REST SITE',`
+    <div style="text-align:center;margin-bottom:20px;color:var(--muted)">Recover your strength.</div>
+    <div class="event-options">
+      <button class="event-btn" onclick="game.heal(Math.floor(game.maxHp*0.3));closeModal();renderMap()">💚 Rest — Heal 30% Max HP</button>
+    </div>`);
+}
+
+function showShop(){
+  openModal('MERCHANT',`
+    <div style="text-align:center; margin-bottom: 20px;">"Take a look..."</div>
+    <div style="display:flex; justify-content:center; gap: 10px;">
+      <button class="btn btn-secondary" onclick="closeModal();renderMap()">LEAVE</button>
+    </div>
+  `);
+}
+
+function triggerEvent(){
+  const ev=choose(EVENTS);
+  let html=`<div style="margin-bottom:20px;">${ev.text}</div><div class="event-options">`;
+  ev.options.forEach((o,i)=>{html+=`<button class="event-btn" onclick="window.currentEvent.options[${i}].act(game);closeModal();renderMap()">${o.text}</button>`});
+  html+='</div>';
+  window.currentEvent=ev;
+  openModal(ev.name,html);
+}
+
+function showReward(){
+  const opt = [randCard('common'), randCard('common'), randCard('uncommon')];
+  let html=`<div class="reward-options">${opt.map((id,i)=>`
+    <div class="reward-card" onclick="game.addCardToDeck('${id}');closeModal();renderMap()">
+      <div class="reward-tag card">CARD</div>
+      <div class="reward-icon">🃏</div>
+      <div class="reward-name">${CARDS.find(c=>c.id===id).name}</div>
+      <div class="reward-desc">${CARDS.find(c=>c.id===id).desc}</div>
+    </div>`).join('')}</div>
+    <div style="margin-top:20px;text-align:center;"><button class="btn btn-secondary" onclick="closeModal();renderMap()">SKIP</button></div>`;
+  openModal('VICTORY REWARD',html);
+}
+
+window.victory = function(){
+  const e=game.enemies[0];
+  if(e) { game.gold+=rand(e.data.gold[0],e.data.gold[1]); game.goldGained+=e.data.gold[1]; }
+  if(game.currentNode) game.mapData[game.currentNode].completed=true;
+  
+  if(game.floor >= 10){ showVictoryScreen(); return; }
+  
+  setTimeout(()=>{ showScreen('map-screen'); showReward(); }, 800);
+}
+
+window.defeat = function(){
+  $('endTitle').textContent='DEFEAT';$('endTitle').className='end-title defeat';
+  $('endStats').innerHTML=`
+    <div class="end-stat"><span class="val">${game.floor}</span><span class="lbl">Floor</span></div>
+    <div class="end-stat"><span class="val">${game.damageDealt}</span><span class="lbl">Damage Dealt</span></div>`;
+  $('endScreen').classList.add('active');
+}
+
+function showVictoryScreen(){
+  $('endTitle').textContent='VICTORY';$('endTitle').className='end-title';
+  $('endStats').innerHTML=`
+    <div class="end-stat"><span class="val">${game.damageDealt}</span><span class="lbl">Damage Dealt</span></div>
+    <div class="end-stat"><span class="val">${game.cardsPlayedTotal}</span><span class="lbl">Cards Played</span></div>`;
+  $('endScreen').classList.add('active');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INIT & CONTROLS
+// ═══════════════════════════════════════════════════════════════
+game.mapData=generateMap(); renderMap();
+
+// Mobile End Turn Controller
+$('endTurnBtn').onclick = () => game.endTurn();
+
+$('newRunBtn').onclick=()=>{
+  game.reset(); game.mapData=generateMap(); renderMap(); 
+  $('endScreen').classList.remove('active'); showScreen('map-screen');
+};
+
+// Canvas Background (Lightweight Node Linker)
+const canvas=$('bg-canvas');const ctx=canvas.getContext('2d');let particles=[],w,h;
+function resize(){w=canvas.width=innerWidth;h=canvas.height=innerHeight;particles=[];for(let i=0;i<40;i++)particles.push({x:Math.random()*w,y:Math.random()*h,vx:(Math.random()-0.5)*0.3,vy:(Math.random()-0.5)*0.3,size:Math.random()*2+1,alpha:Math.random()*0.5+0.1})}
+function animate(){
+  ctx.clearRect(0,0,w,h);ctx.strokeStyle='#00d4aa';ctx.lineWidth=0.5;
+  particles.forEach(p=>{
+    p.x+=p.vx;p.y+=p.vy;if(p.x<0)p.x=w;if(p.x>w)p.x=0;if(p.y<0)p.y=h;if(p.y>h)p.y=0;
+    particles.forEach(q=>{const dx=p.x-q.x,dy=p.y-q.y,dist=Math.sqrt(dx*dx+dy*dy);if(dist<150){ctx.globalAlpha=(1-dist/150)*0.15;ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);ctx.stroke()}});
+    ctx.globalAlpha=p.alpha;ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fill()
+  });
+  requestAnimationFrame(animate);
+}
+addEventListener('resize',resize); resize(); animate();
+
+</script>
 </body>
 </html>
